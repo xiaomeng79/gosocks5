@@ -4,9 +4,9 @@ import (
 	"flag"
 	"log"
 
-	"github.com/ginuerzh/gosocks5"
+	"github.com/go-gost/gosocks5"
 
-	"github.com/ginuerzh/gosocks5/client"
+	"github.com/go-gost/gosocks5/client"
 )
 
 var (
@@ -14,6 +14,7 @@ var (
 )
 
 func init() {
+	log.SetFlags(log.Lshortfile | log.LstdFlags)
 	flag.StringVar(&server, "p", "", "SOCKS5 server address")
 	flag.Parse()
 }

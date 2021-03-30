@@ -1,4 +1,4 @@
 gosocks5
 ========
 
-golang and SOCKSV5
+golang and SOCKSv5

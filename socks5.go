@@ -31,14 +31,14 @@ const (
 
 const (
 	CmdConnect uint8 = 1
-	CmdBind          = 2
-	CmdUdp           = 3
+	CmdBind    uint8 = 2
+	CmdUdp     uint8 = 3
 )
 
 const (
 	AddrIPv4   uint8 = 1
-	AddrDomain       = 3
-	AddrIPv6         = 4
+	AddrDomain uint8 = 3
+	AddrIPv6   uint8 = 4
 )
 
 const (
@@ -54,26 +54,33 @@ const (
 )
 
 var (
-	ErrBadVersion  = errors.New("Bad version")
-	ErrBadFormat   = errors.New("Bad format")
-	ErrBadAddrType = errors.New("Bad address type")
-	ErrShortBuffer = errors.New("Short buffer")
-	ErrBadMethod   = errors.New("Bad method")
-	ErrAuthFailure = errors.New("Auth failure")
+	ErrBadVersion  = errors.New("bad version")
+	ErrBadFormat   = errors.New("bad format")
+	ErrBadAddrType = errors.New("bad address type")
+	ErrShortBuffer = errors.New("short buffer")
+	ErrBadMethod   = errors.New("bad method")
+	ErrAuthFailure = errors.New("auth failure")
+)
+
+var (
+	SmallPoolSize = 1024
+	LargePoolSize = 16 * 1024
 )
 
 // buffer pools
 var (
+	// small buff pool
 	sPool = sync.Pool{
 		New: func() interface{} {
-			return make([]byte, 576)
+			return make([]byte, SmallPoolSize)
 		},
-	} // small buff pool
+	}
+	// large buff pool for udp
 	lPool = sync.Pool{
 		New: func() interface{} {
-			return make([]byte, 64*1024+262)
+			return make([]byte, LargePoolSize)
 		},
-	} // large buff pool for udp
+	}
 )
 
 /*
@@ -300,28 +307,67 @@ func NewAddr(sa string) (addr *Addr, err error) {
 	return
 }
 
-func (addr *Addr) Decode(b []byte) error {
+func (addr *Addr) ReadFrom(r io.Reader) (n int64, err error) {
+	b := sPool.Get().([]byte)
+	defer sPool.Put(b)
+
+	_, err = io.ReadFull(r, b[:1])
+	if err != nil {
+		return
+	}
 	addr.Type = b[0]
-	pos := 1
+	n++
+
 	switch addr.Type {
 	case AddrIPv4:
-		addr.Host = net.IP(b[pos : pos+net.IPv4len]).String()
-		pos += net.IPv4len
+		_, err = io.ReadFull(r, b[:net.IPv4len])
+		addr.Host = net.IP(b[:net.IPv4len]).String()
+		n += net.IPv4len
 	case AddrIPv6:
-		addr.Host = net.IP(b[pos : pos+net.IPv6len]).String()
-		pos += net.IPv6len
+		_, err = io.ReadFull(r, b[:net.IPv6len])
+		addr.Host = net.IP(b[:net.IPv6len]).String()
+		n += net.IPv6len
 	case AddrDomain:
-		addrlen := int(b[pos])
-		pos++
-		addr.Host = string(b[pos : pos+addrlen])
-		pos += addrlen
+		if _, err = io.ReadFull(r, b[:1]); err != nil {
+			return
+		}
+		addrlen := int(b[0])
+		n++
+
+		_, err = io.ReadFull(r, b[:addrlen])
+		addr.Host = string(b[:addrlen])
+		n += int64(addrlen)
 	default:
-		return ErrBadAddrType
+		err = ErrBadAddrType
+		return
+	}
+	if err != nil {
+		return
 	}
 
-	addr.Port = binary.BigEndian.Uint16(b[pos:])
+	_, err = io.ReadFull(r, b[:2])
+	addr.Port = binary.BigEndian.Uint16(b[:2])
+	n += 2
 
-	return nil
+	return
+}
+
+func (addr *Addr) WriteTo(w io.Writer) (int64, error) {
+	b := sPool.Get().([]byte)
+	defer sPool.Put(b)
+
+	nn, err := addr.Encode(b)
+	if err != nil {
+		return int64(nn), err
+	}
+
+	nn, err = w.Write(b)
+	return int64(nn), err
+}
+
+func (addr *Addr) Decode(b []byte) error {
+	_, err := addr.ReadFrom(bytes.NewReader(b))
+	return err
 }
 
 func (addr *Addr) Encode(b []byte) (int, error) {
@@ -334,20 +380,20 @@ func (addr *Addr) Encode(b []byte) (int, error) {
 			ip4 = net.IPv4zero.To4()
 		}
 		pos += copy(b[pos:], ip4)
-	case AddrDomain:
-		b[pos] = byte(len(addr.Host))
-		pos++
-		pos += copy(b[pos:], []byte(addr.Host))
 	case AddrIPv6:
 		ip16 := net.ParseIP(addr.Host).To16()
 		if ip16 == nil {
 			ip16 = net.IPv6zero.To16()
 		}
 		pos += copy(b[pos:], ip16)
+	case AddrDomain:
+		b[pos] = byte(len(addr.Host))
+		pos++
+		pos += copy(b[pos:], []byte(addr.Host))
 	default:
 		b[0] = AddrIPv4
-		copy(b[pos:pos+4], net.IPv4zero.To4())
-		pos += 4
+		copy(b[pos:pos+net.IPv4len], net.IPv4zero.To4())
+		pos += net.IPv4len
 	}
 	binary.BigEndian.PutUint16(b[pos:], addr.Port)
 	pos += 2
