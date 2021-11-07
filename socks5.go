@@ -606,6 +606,30 @@ func NewUDPHeader(rsv uint16, frag uint8, addr *Addr) *UDPHeader {
 	}
 }
 
+func (h *UDPHeader) ReadFrom(r io.Reader) (n int64, err error) {
+	var b [3]byte
+
+	nn, err := io.ReadFull(r, b[:])
+	n += int64(nn)
+	if err != nil {
+		return
+	}
+
+	h.Rsv = binary.BigEndian.Uint16(b[:2])
+	h.Frag = b[2]
+
+	if h.Addr == nil {
+		h.Addr = &Addr{}
+	}
+	v, err := h.Addr.ReadFrom(r)
+	n += v
+	if err != nil {
+		return
+	}
+
+	return
+}
+
 func (h *UDPHeader) WriteTo(w io.Writer) (int64, error) {
 	var b [3]byte
 	binary.BigEndian.PutUint16(b[:2], h.Rsv)
