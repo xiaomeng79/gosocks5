@@ -63,22 +63,15 @@ var (
 )
 
 var (
-	SmallPoolSize = 1024
 	LargePoolSize = 16 * 1024
 )
 
 // buffer pools
 var (
-	// small buff pool
-	sPool = sync.Pool{
-		New: func() interface{} {
-			return make([]byte, SmallPoolSize)
-		},
-	}
 	// large buff pool for udp
-	lPool = sync.Pool{
+	pool = sync.Pool{
 		New: func() interface{} {
-			return make([]byte, LargePoolSize)
+			return make([]byte, 64*1024)
 		},
 	}
 )
@@ -92,11 +85,9 @@ Method selection
  +----+----------+----------+
 */
 func ReadMethods(r io.Reader) ([]uint8, error) {
-	//b := make([]byte, 257)
-	b := sPool.Get().([]byte)
-	defer sPool.Put(b)
+	var b [257]byte
 
-	n, err := io.ReadAtLeast(r, b, 2)
+	n, err := io.ReadAtLeast(r, b[:], 2)
 	if err != nil {
 		return nil, err
 	}
@@ -150,11 +141,9 @@ func NewUserPassRequest(ver byte, u, p string) *UserPassRequest {
 }
 
 func ReadUserPassRequest(r io.Reader) (*UserPassRequest, error) {
-	// b := make([]byte, 513)
-	b := sPool.Get().([]byte)
-	defer sPool.Put(b)
+	var b [513]byte
 
-	n, err := io.ReadAtLeast(r, b, 2)
+	n, err := io.ReadAtLeast(r, b[:], 2)
 	if err != nil {
 		return nil, err
 	}
@@ -190,9 +179,7 @@ func ReadUserPassRequest(r io.Reader) (*UserPassRequest, error) {
 }
 
 func (req *UserPassRequest) Write(w io.Writer) error {
-	// b := make([]byte, 513)
-	b := sPool.Get().([]byte)
-	defer sPool.Put(b)
+	var b [513]byte
 
 	b[0] = req.Version
 	ulen := len(req.Username)
@@ -236,11 +223,9 @@ func NewUserPassResponse(ver, status byte) *UserPassResponse {
 }
 
 func ReadUserPassResponse(r io.Reader) (*UserPassResponse, error) {
-	// b := make([]byte, 2)
-	b := sPool.Get().([]byte)
-	defer sPool.Put(b)
+	var b [2]byte
 
-	if _, err := io.ReadFull(r, b[:2]); err != nil {
+	if _, err := io.ReadFull(r, b[:]); err != nil {
 		return nil, err
 	}
 
@@ -308,8 +293,7 @@ func NewAddr(sa string) (addr *Addr, err error) {
 }
 
 func (addr *Addr) ReadFrom(r io.Reader) (n int64, err error) {
-	b := sPool.Get().([]byte)
-	defer sPool.Put(b)
+	var b [255]byte
 
 	_, err = io.ReadFull(r, b[:1])
 	if err != nil {
@@ -353,15 +337,13 @@ func (addr *Addr) ReadFrom(r io.Reader) (n int64, err error) {
 }
 
 func (addr *Addr) WriteTo(w io.Writer) (int64, error) {
-	b := sPool.Get().([]byte)
-	defer sPool.Put(b)
-
-	nn, err := addr.Encode(b)
+	var b [259]byte
+	nn, err := addr.Encode(b[:])
 	if err != nil {
 		return int64(nn), err
 	}
 
-	nn, err = w.Write(b)
+	nn, err = w.Write(b[:nn])
 	return int64(nn), err
 }
 
@@ -440,11 +422,9 @@ func NewRequest(cmd uint8, addr *Addr) *Request {
 }
 
 func ReadRequest(r io.Reader) (*Request, error) {
-	// b := make([]byte, 262)
-	b := sPool.Get().([]byte)
-	defer sPool.Put(b)
+	var b [262]byte
 
-	n, err := io.ReadAtLeast(r, b, 5)
+	n, err := io.ReadAtLeast(r, b[:], 5)
 	if err != nil {
 		return nil, err
 	}
@@ -485,9 +465,7 @@ func ReadRequest(r io.Reader) (*Request, error) {
 }
 
 func (r *Request) Write(w io.Writer) (err error) {
-	//b := make([]byte, 262)
-	b := sPool.Get().([]byte)
-	defer sPool.Put(b)
+	var b [262]byte
 
 	b[0] = Ver5
 	b[1] = r.Cmd
@@ -535,11 +513,9 @@ func NewReply(rep uint8, addr *Addr) *Reply {
 }
 
 func ReadReply(r io.Reader) (*Reply, error) {
-	// b := make([]byte, 262)
-	b := sPool.Get().([]byte)
-	defer sPool.Put(b)
+	var b [262]byte
 
-	n, err := io.ReadAtLeast(r, b, 5)
+	n, err := io.ReadAtLeast(r, b[:], 5)
 	if err != nil {
 		return nil, err
 	}
@@ -581,9 +557,7 @@ func ReadReply(r io.Reader) (*Reply, error) {
 }
 
 func (r *Reply) Write(w io.Writer) (err error) {
-	// b := make([]byte, 262)
-	b := sPool.Get().([]byte)
-	defer sPool.Put(b)
+	var b [262]byte
 
 	b[0] = Ver5
 	b[1] = r.Rep
@@ -632,21 +606,21 @@ func NewUDPHeader(rsv uint16, frag uint8, addr *Addr) *UDPHeader {
 	}
 }
 
-func (h *UDPHeader) Write(w io.Writer) error {
-	b := sPool.Get().([]byte)
-	defer sPool.Put(b)
-
+func (h *UDPHeader) WriteTo(w io.Writer) (int64, error) {
+	var b [3]byte
 	binary.BigEndian.PutUint16(b[:2], h.Rsv)
 	b[2] = h.Frag
+
+	if n, err := w.Write(b[:]); err != nil {
+		return int64(n), err
+	}
 
 	addr := h.Addr
 	if addr == nil {
 		addr = &Addr{}
 	}
-	length, _ := addr.Encode(b[3:])
-
-	_, err := w.Write(b[:3+length])
-	return err
+	nn, err := addr.WriteTo(w)
+	return 3 + nn, err
 }
 
 func (h *UDPHeader) String() string {
@@ -666,19 +640,20 @@ func NewUDPDatagram(header *UDPHeader, data []byte) *UDPDatagram {
 	}
 }
 
-func ReadUDPDatagram(r io.Reader) (*UDPDatagram, error) {
-	b := lPool.Get().([]byte)
-	defer lPool.Put(b)
+func (d *UDPDatagram) ReadFrom(r io.Reader) (n int64, err error) {
+	b := pool.Get().([]byte)
+	defer pool.Put(b)
 
 	// when r is a streaming (such as TCP connection), we may read more than the required data,
-	// but we don't know how to handle it. So we use io.ReadFull to instead of io.ReadAtLeast
+	// but we don't know how to handle it. So we use io.ReadFull instead of io.ReadAtLeast
 	// to make sure that no redundant data will be discarded.
-	n, err := io.ReadFull(r, b[:5])
+	nn, err := io.ReadFull(r, b[:5])
+	n += int64(nn)
 	if err != nil {
-		return nil, err
+		return
 	}
 
-	header := &UDPHeader{
+	d.Header = &UDPHeader{
 		Rsv:  binary.BigEndian.Uint16(b[:2]),
 		Frag: b[2],
 	}
@@ -693,54 +668,57 @@ func ReadUDPDatagram(r io.Reader) (*UDPDatagram, error) {
 	case AddrDomain:
 		hlen = 7 + int(b[4])
 	default:
-		return nil, ErrBadAddrType
+		err = ErrBadAddrType
+		return
 	}
 
-	dlen := int(header.Rsv)
+	dlen := int(d.Header.Rsv)
 	if dlen == 0 { // standard SOCKS5 UDP datagram
 		extra, err := ioutil.ReadAll(r) // we assume no redundant data
 		if err != nil {
-			return nil, err
+			return n, err
 		}
-		copy(b[n:], extra)
-		n += len(extra) // total length
-		dlen = n - hlen // data length
+		copy(b[nn:], extra)
+		nn += len(extra) // total length
+		dlen = nn - hlen // data length
 	} else { // extended feature, for UDP over TCP, using reserved field as data length
 		if _, err := io.ReadFull(r, b[n:hlen+dlen]); err != nil {
-			return nil, err
+			return n, err
 		}
-		n = hlen + dlen
+		nn = hlen + dlen // total length
 	}
 
-	header.Addr = new(Addr)
-	if err := header.Addr.Decode(b[3:hlen]); err != nil {
-		return nil, err
+	if dlen <= 0 {
+		return n, errors.New("empty data")
 	}
 
-	data := make([]byte, dlen)
-	copy(data, b[hlen:n])
-
-	d := &UDPDatagram{
-		Header: header,
-		Data:   data,
+	d.Header.Addr = new(Addr)
+	if err := d.Header.Addr.Decode(b[3:hlen]); err != nil {
+		return n, err
 	}
 
-	return d, nil
+	if d.Data == nil {
+		d.Data = make([]byte, dlen)
+	}
+	nn = copy(d.Data, b[hlen:nn])
+
+	return int64(hlen + nn), nil
 }
 
-func (d *UDPDatagram) Write(w io.Writer) error {
+func (d *UDPDatagram) WriteTo(w io.Writer) (n int64, err error) {
 	h := d.Header
 	if h == nil {
 		h = &UDPHeader{}
 	}
-	buf := bytes.Buffer{}
-	if err := h.Write(&buf); err != nil {
-		return err
+	n, err = h.WriteTo(w)
+	if err != nil {
+		return
 	}
-	if _, err := buf.Write(d.Data); err != nil {
-		return err
+	nn, err := w.Write(d.Data)
+	n += int64(nn)
+	if err != nil {
+		return
 	}
 
-	_, err := buf.WriteTo(w)
-	return err
+	return
 }
