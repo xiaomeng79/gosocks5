@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"strconv"
 	"sync"
@@ -281,14 +280,6 @@ func NewAddr(sa string) (addr *Addr, err error) {
 		Port: uint16(port),
 	}
 
-	if ip := net.ParseIP(host); ip != nil {
-		if ip.To4() != nil {
-			addr.Type = AddrIPv4
-		} else {
-			addr.Type = AddrIPv6
-		}
-	}
-
 	return
 }
 
@@ -353,6 +344,8 @@ func (addr *Addr) Decode(b []byte) error {
 }
 
 func (addr *Addr) Encode(b []byte) (int, error) {
+	addr.checkType()
+
 	b[0] = addr.Type
 	pos := 1
 	switch addr.Type {
@@ -381,6 +374,21 @@ func (addr *Addr) Encode(b []byte) (int, error) {
 	pos += 2
 
 	return pos, nil
+}
+
+func (addr *Addr) checkType() {
+	switch addr.Type {
+	case AddrIPv4, AddrIPv6, AddrDomain:
+	default:
+		addr.Type = AddrDomain
+		if ip := net.ParseIP(addr.Host); ip != nil {
+			if ip.To4() != nil {
+				addr.Type = AddrIPv4
+			} else {
+				addr.Type = AddrIPv6
+			}
+		}
+	}
 }
 
 func (addr *Addr) Length() (n int) {
@@ -664,69 +672,41 @@ func NewUDPDatagram(header *UDPHeader, data []byte) *UDPDatagram {
 	}
 }
 
+// ReadFrom reads UDP datagram from r.
 func (d *UDPDatagram) ReadFrom(r io.Reader) (n int64, err error) {
-	b := pool.Get().([]byte)
-	defer pool.Put(b)
-
-	// when r is a streaming (such as TCP connection), we may read more than the required data,
-	// but we don't know how to handle it. So we use io.ReadFull instead of io.ReadAtLeast
-	// to make sure that no redundant data will be discarded.
-	nn, err := io.ReadFull(r, b[:5])
-	n += int64(nn)
+	if d.Header == nil {
+		d.Header = &UDPHeader{}
+	}
+	n, err = d.Header.ReadFrom(r)
 	if err != nil {
 		return
 	}
 
-	d.Header = &UDPHeader{
-		Rsv:  binary.BigEndian.Uint16(b[:2]),
-		Frag: b[2],
-	}
-
-	atype := b[3]
-	hlen := 0
-	switch atype {
-	case AddrIPv4:
-		hlen = 10
-	case AddrIPv6:
-		hlen = 22
-	case AddrDomain:
-		hlen = 7 + int(b[4])
-	default:
-		err = ErrBadAddrType
-		return
-	}
-
-	dlen := int(d.Header.Rsv)
+	dlen := int64(d.Header.Rsv)
 	if dlen == 0 { // standard SOCKS5 UDP datagram
-		extra, err := ioutil.ReadAll(r) // we assume no redundant data
+		// TODO: avoid memory allocation
+		d.Data, err = io.ReadAll(r)
 		if err != nil {
-			return n, err
+			return
 		}
-		copy(b[nn:], extra)
-		nn += len(extra) // total length
-		dlen = nn - hlen // data length
+		dlen = int64(len(d.Data))
 	} else { // extended feature, for UDP over TCP, using reserved field as data length
-		if _, err := io.ReadFull(r, b[n:hlen+dlen]); err != nil {
-			return n, err
+		b := pool.Get().([]byte)
+		defer pool.Put(b)
+
+		if _, err = io.ReadFull(r, b[:dlen]); err != nil {
+			return
 		}
-		nn = hlen + dlen // total length
+		// TODO: avoid memory allocation
+		if d.Data == nil {
+			d.Data = make([]byte, dlen)
+		}
+		copy(d.Data, b[:dlen])
 	}
 
-	if dlen <= 0 {
-		return n, errors.New("empty data")
-	}
+	n += dlen
 
-	d.Header.Addr = new(Addr)
-	if err := d.Header.Addr.Decode(b[3:hlen]); err != nil {
-		return n, err
-	}
-
-	if d.Data == nil {
-		d.Data = make([]byte, dlen)
-	}
-	nn = copy(d.Data, b[hlen:nn])
-
-	return int64(hlen + nn), nil
+	return
 }
 
 func (d *UDPDatagram) WriteTo(w io.Writer) (n int64, err error) {
