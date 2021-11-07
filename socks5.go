@@ -392,15 +392,17 @@ func (addr *Addr) checkType() {
 }
 
 func (addr *Addr) Length() (n int) {
+	addr.checkType()
+
 	switch addr.Type {
 	case AddrIPv4:
-		n = 10
+		n = 7
 	case AddrIPv6:
-		n = 22
+		n = 19
 	case AddrDomain:
-		n = 7 + len(addr.Host)
+		n = 4 + len(addr.Host)
 	default:
-		n = 10
+		n = 7
 	}
 	return
 }
