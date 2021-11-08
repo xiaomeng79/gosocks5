@@ -65,9 +65,8 @@ var (
 	LargePoolSize = 16 * 1024
 )
 
-// buffer pools
 var (
-	// large buff pool for udp
+	// buff pool for udp
 	pool = sync.Pool{
 		New: func() interface{} {
 			return make([]byte, 64*1024)
@@ -693,17 +692,14 @@ func (d *UDPDatagram) ReadFrom(r io.Reader) (n int64, err error) {
 		}
 		dlen = int64(len(d.Data))
 	} else { // extended feature, for UDP over TCP, using reserved field as data length
-		b := pool.Get().([]byte)
-		defer pool.Put(b)
-
-		if _, err = io.ReadFull(r, b[:dlen]); err != nil {
-			return
-		}
-		// TODO: avoid memory allocation
-		if d.Data == nil {
+		if cap(d.Data) >= int(dlen) {
+			d.Data = d.Data[:dlen]
+		} else {
 			d.Data = make([]byte, dlen)
 		}
-		copy(d.Data, b[:dlen])
+		if _, err = io.ReadFull(r, d.Data[:]); err != nil {
+			return
+		}
 	}
 
 	n += dlen
