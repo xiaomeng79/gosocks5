@@ -274,10 +274,11 @@ func NewAddr(sa string) (addr *Addr, err error) {
 	}
 
 	addr = &Addr{
-		Type: AddrDomain,
 		Host: host,
 		Port: uint16(port),
 	}
+
+	addr.checkType()
 
 	return
 }
