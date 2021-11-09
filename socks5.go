@@ -264,23 +264,26 @@ type Addr struct {
 }
 
 func NewAddr(sa string) (addr *Addr, err error) {
-	host, sport, err := net.SplitHostPort(sa)
+	addr = &Addr{}
+	err = addr.ParseFrom(sa)
+	return
+}
+
+func (addr *Addr) ParseFrom(saddr string) error {
+	host, sport, err := net.SplitHostPort(saddr)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	port, err := strconv.Atoi(sport)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	addr = &Addr{
-		Host: host,
-		Port: uint16(port),
-	}
-
+	addr.Host = host
+	addr.Port = uint16(port)
 	addr.checkType()
 
-	return
+	return nil
 }
 
 func (addr *Addr) ReadFrom(r io.Reader) (n int64, err error) {
