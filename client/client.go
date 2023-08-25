@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"net"
 	"time"
 
@@ -23,8 +24,8 @@ func Dial(addr string, options ...DialOption) (net.Conn, error) {
 	if selector == nil {
 		selector = DefaultSelector
 	}
-
-	cc := gosocks5.ClientConn(conn, selector)
+	ctx := context.Background()
+	cc := gosocks5.ClientConn(ctx, conn, selector)
 	if err := cc.Handleshake(); err != nil {
 		conn.Close()
 		return nil, err

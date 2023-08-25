@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"net"
 	"net/url"
 
@@ -36,7 +37,7 @@ func (selector *clientSelector) Select(methods ...uint8) (method uint8) {
 	return
 }
 
-func (selector *clientSelector) OnSelected(method uint8, conn net.Conn) (net.Conn, error) {
+func (selector *clientSelector) OnSelected(ctx context.Context, method uint8, conn net.Conn) (context.Context, net.Conn, error) {
 	switch method {
 	case gosocks5.MethodUserPass:
 		var username, password string
@@ -47,18 +48,18 @@ func (selector *clientSelector) OnSelected(method uint8, conn net.Conn) (net.Con
 
 		req := gosocks5.NewUserPassRequest(gosocks5.UserPassVer, username, password)
 		if err := req.Write(conn); err != nil {
-			return nil, err
+			return ctx, nil, err
 		}
 		resp, err := gosocks5.ReadUserPassResponse(conn)
 		if err != nil {
-			return nil, err
+			return ctx, nil, err
 		}
 		if resp.Status != gosocks5.Succeeded {
-			return nil, gosocks5.ErrAuthFailure
+			return ctx, nil, gosocks5.ErrAuthFailure
 		}
 	case gosocks5.MethodNoAcceptable:
-		return nil, gosocks5.ErrBadMethod
+		return ctx, nil, gosocks5.ErrBadMethod
 	}
 
-	return conn, nil
+	return ctx, conn, nil
 }

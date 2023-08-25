@@ -1,7 +1,9 @@
 package gosocks5
 
 import (
+	"context"
 	"io"
+
 	//"log"
 	"net"
 	"sync"
@@ -14,10 +16,11 @@ type Selector interface {
 	// select method
 	Select(methods ...uint8) (method uint8)
 	// on method selected
-	OnSelected(method uint8, conn net.Conn) (net.Conn, error)
+	OnSelected(ctx context.Context, method uint8, conn net.Conn) (context.Context, net.Conn, error)
 }
 
 type Conn struct {
+	ctx            context.Context
 	c              net.Conn
 	selector       Selector
 	method         uint8
@@ -27,16 +30,18 @@ type Conn struct {
 	handshakeErr   error
 }
 
-func ClientConn(conn net.Conn, selector Selector) *Conn {
+func ClientConn(ctx context.Context, conn net.Conn, selector Selector) *Conn {
 	return &Conn{
+		ctx:      ctx,
 		c:        conn,
 		selector: selector,
 		isClient: true,
 	}
 }
 
-func ServerConn(conn net.Conn, selector Selector) *Conn {
+func ServerConn(ctx context.Context, conn net.Conn, selector Selector) *Conn {
 	return &Conn{
+		ctx:      ctx,
 		c:        conn,
 		selector: selector,
 	}
@@ -92,10 +97,11 @@ func (conn *Conn) clientHandshake() error {
 	}
 
 	if conn.selector != nil {
-		c, err := conn.selector.OnSelected(b[1], conn.c)
+		ctx, c, err := conn.selector.OnSelected(conn.ctx, b[1], conn.c)
 		if err != nil {
 			return err
 		}
+		conn.ctx = ctx
 		conn.c = c
 	}
 	conn.method = b[1]
@@ -120,11 +126,12 @@ func (conn *Conn) serverHandshake() error {
 	}
 
 	if conn.selector != nil {
-		c, err := conn.selector.OnSelected(method, conn.c)
+		ctx, c, err := conn.selector.OnSelected(conn.ctx, method, conn.c)
 		if err != nil {
 			return err
 		}
 		conn.c = c
+		conn.ctx = ctx
 	}
 	conn.method = method
 	//log.Println("method:", method)
@@ -168,4 +175,8 @@ func (conn *Conn) SetReadDeadline(t time.Time) error {
 
 func (conn *Conn) SetWriteDeadline(t time.Time) error {
 	return conn.c.SetWriteDeadline(t)
+}
+
+func (conn *Conn) GetCtx() context.Context {
+	return conn.ctx
 }

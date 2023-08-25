@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net"
 	"net/url"
 
@@ -44,12 +45,12 @@ func (selector *serverSelector) Select(methods ...uint8) (method uint8) {
 	return
 }
 
-func (selector *serverSelector) OnSelected(method uint8, conn net.Conn) (net.Conn, error) {
+func (selector *serverSelector) OnSelected(ctx context.Context, method uint8, conn net.Conn) (context.Context, net.Conn, error) {
 	switch method {
 	case gosocks5.MethodUserPass:
 		req, err := gosocks5.ReadUserPassRequest(conn)
 		if err != nil {
-			return nil, err
+			return ctx, nil, err
 		}
 
 		valid := false
@@ -66,18 +67,18 @@ func (selector *serverSelector) OnSelected(method uint8, conn net.Conn) (net.Con
 		if len(selector.users) > 0 && !valid {
 			resp := gosocks5.NewUserPassResponse(gosocks5.UserPassVer, gosocks5.Failure)
 			if err := resp.Write(conn); err != nil {
-				return nil, err
+				return ctx, nil, err
 			}
-			return nil, gosocks5.ErrAuthFailure
+			return ctx, nil, gosocks5.ErrAuthFailure
 		}
 
 		resp := gosocks5.NewUserPassResponse(gosocks5.UserPassVer, gosocks5.Succeeded)
 		if err := resp.Write(conn); err != nil {
-			return nil, err
+			return ctx, nil, err
 		}
 	case gosocks5.MethodNoAcceptable:
-		return nil, gosocks5.ErrBadMethod
+		return ctx, nil, gosocks5.ErrBadMethod
 	}
 
-	return conn, nil
+	return ctx, conn, nil
 }

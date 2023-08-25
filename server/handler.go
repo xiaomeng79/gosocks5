@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -31,7 +32,8 @@ type serverHandler struct {
 }
 
 func (h *serverHandler) Handle(conn net.Conn) error {
-	conn = gosocks5.ServerConn(conn, h.selector)
+	ctx := context.Background()
+	conn = gosocks5.ServerConn(ctx, conn, h.selector)
 	req, err := gosocks5.ReadRequest(conn)
 	if err != nil {
 		return err
